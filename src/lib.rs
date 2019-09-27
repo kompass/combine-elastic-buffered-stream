@@ -47,6 +47,24 @@ impl CheckPointSet {
 
         cp
     }
+
+    fn min(&self) -> Option<usize> {
+        let mut min: Option<usize> = None;
+
+        self.0.borrow_mut().retain(|cp| {
+            if let Some(intern) = cp.0.upgrade() {
+                let pos = intern.get();
+
+                min = min.map(|val| val.min(pos));
+
+                true
+            } else {
+                false
+            }
+        });
+
+        min
+    }
 }
 
 pub struct ElasticBufferedReadStream<R: Read> {
@@ -67,6 +85,10 @@ impl<R: Read> ElasticBufferedReadStream<R> {
             offset: 0,
         }
     }
+
+    fn free_useless_chunks(&mut self) {
+        // TODO: implement free_useless_chunks using CheckPointSet::min
+    }
 }
 
 impl<R: Read> StreamOnce for ElasticBufferedReadStream<R> {
@@ -80,6 +102,7 @@ impl<R: Read> StreamOnce for ElasticBufferedReadStream<R> {
         let item_index = self.cursor_pos % CHUNK_SIZE;
 
         if self.buffer.len() <= chunk_index {
+            self.free_useless_chunks();
             self.buffer.push_back([0; CHUNK_SIZE]);
             self.raw_read.read(self.buffer.back_mut().unwrap())?;
         }
