@@ -1,18 +1,53 @@
-use std::cell::RefCell;
+use std::cell::{RefCell, Cell};
 use combine::stream::{Positioned, Resetable, StreamErrorFor, StreamOnce};
 use combine::stream::easy::Errors;
 use std::collections::VecDeque;
-use std::collections::BTreeSet;
 use std::io::Read;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 const CHUNK_SIZE: usize = 8096;
 
 pub type CheckPointId = usize;
 
-pub type CheckPoint = Rc<RefCell<usize>>;
+pub type InternalCheckPoint = Cell<usize>;
 
-type CheckPointSet = Rc<RefCell<BTreeSet<CheckPoint>>>;
+#[derive(Clone)]
+pub struct CheckPoint(Rc<InternalCheckPoint>);
+
+impl CheckPoint {
+    fn new(pos: usize) -> CheckPoint {
+        CheckPoint(Rc::new(Cell::new(pos)))
+    }
+
+    fn inner(&self) -> usize {
+        self.0.get()
+    }
+}
+
+pub struct CheckPointHandler(Weak<InternalCheckPoint>);
+
+impl CheckPointHandler {
+    fn from_checkpoint(cp: &CheckPoint) -> CheckPointHandler {
+        let weak_ref = Rc::downgrade(&cp.0);
+
+        CheckPointHandler(weak_ref)
+    }
+}
+
+struct CheckPointSet(RefCell<VecDeque<CheckPointHandler>>);
+
+impl CheckPointSet {
+    fn new() -> CheckPointSet {
+        CheckPointSet(RefCell::new(VecDeque::new()))
+    }
+
+    fn insert(&self, pos: usize) -> CheckPoint {
+        let cp = CheckPoint::new(pos);
+        self.0.borrow_mut().push_back(CheckPointHandler::from_checkpoint(&cp));
+
+        cp
+    }
+}
 
 pub struct ElasticBufferedReadStream<R: Read> {
     raw_read: R,
@@ -27,7 +62,7 @@ impl<R: Read> ElasticBufferedReadStream<R> {
         Self {
             raw_read: read,
             buffer: VecDeque::new(),
-            checkpoints: Rc::new(RefCell::new(BTreeSet::new())),
+            checkpoints: CheckPointSet::new(),
             cursor_pos: 0,
             offset: 0,
         }
@@ -67,14 +102,11 @@ impl<R: Read> Resetable for ElasticBufferedReadStream<R> {
     type Checkpoint = CheckPoint;
 
     fn checkpoint(&self) -> Self::Checkpoint {
-        let cp = Rc::new(RefCell::new(self.cursor_pos));
-        self.checkpoints.borrow_mut().insert(cp.clone());
-
-        cp
+        self.checkpoints.insert(self.cursor_pos)
     }
 
     fn reset(&mut self, checkpoint: Self::Checkpoint) {
-        self.cursor_pos = *checkpoint.borrow();
+        self.cursor_pos = checkpoint.inner();
     }
 }
 
