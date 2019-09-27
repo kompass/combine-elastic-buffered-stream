@@ -87,7 +87,12 @@ impl<R: Read> ElasticBufferedReadStream<R> {
     }
 
     fn free_useless_chunks(&mut self) {
-        // TODO: implement free_useless_chunks using CheckPointSet::min
+        let min_checkpoint_pos = self.checkpoints.min();
+        if let Some(min) = min_checkpoint_pos {
+            self.buffer.drain(..min%CHUNK_SIZE);
+        } else {
+            self.buffer.drain(..self.buffer.len());
+        }
     }
 }
 
