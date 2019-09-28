@@ -4,6 +4,7 @@ use combine::stream::easy::Errors;
 use std::collections::VecDeque;
 use std::io::Read;
 use std::rc::{Rc, Weak};
+use core::num::NonZeroUsize;
 
 const CHUNK_SIZE: usize = 8096;
 
@@ -70,6 +71,7 @@ impl CheckPointSet {
 pub struct ElasticBufferedReadStream<R: Read> {
     raw_read: R,
     buffer: VecDeque<[u8; CHUNK_SIZE]>,
+    eof: Option<NonZeroUsize>,
     checkpoints: CheckPointSet,
     cursor_pos: usize,
     offset: u64, // The capacity of this parameter limits the size of the stream
@@ -80,6 +82,7 @@ impl<R: Read> ElasticBufferedReadStream<R> {
         Self {
             raw_read: read,
             buffer: VecDeque::new(),
+            eof: None,
             checkpoints: CheckPointSet::new(),
             cursor_pos: 0,
             offset: 0,
@@ -96,6 +99,19 @@ impl<R: Read> ElasticBufferedReadStream<R> {
     }
 }
 
+fn read_exact_or_eof<R: Read>(reader: &mut R, mut chunk: &mut [u8]) -> std::io::Result<Option<NonZeroUsize>> {
+    while !chunk.is_empty() {
+        match reader.read(chunk) {
+            Ok(0) => break,
+            Ok(n) => { let tmp = chunk; chunk = &mut tmp[n..];}
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {},
+            Err(e) => return Err(e),
+        }
+    }
+
+    Ok(NonZeroUsize::new(chunk.len()))
+}
+
 impl<R: Read> StreamOnce for ElasticBufferedReadStream<R> {
     type Item = u8;
     type Range = u8; // TODO: Change it when we implement RangeStream
@@ -107,9 +123,15 @@ impl<R: Read> StreamOnce for ElasticBufferedReadStream<R> {
         let item_index = self.cursor_pos % CHUNK_SIZE;
 
         if self.buffer.len() <= chunk_index {
-            self.free_useless_chunks();
-            self.buffer.push_back([0; CHUNK_SIZE]);
-            self.raw_read.read(self.buffer.back_mut().unwrap())?;
+            if let Some(eof_pos_from_right) = self.eof {
+                if item_index >= CHUNK_SIZE - eof_pos_from_right.get() {
+                    return Err(StreamErrorFor::<Self>::end_of_input());
+                }
+            } else {
+                self.free_useless_chunks();
+                self.buffer.push_back([0; CHUNK_SIZE]);
+                self.eof = read_exact_or_eof(&mut self.raw_read, self.buffer.back_mut().unwrap())?;
+            }
         }
 
         let chunk = self.buffer.get(chunk_index).unwrap(); // We can unwrap because self.buffer.len() > chunk_index
@@ -141,7 +163,7 @@ impl<R: Read> Resetable for ElasticBufferedReadStream<R> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn it_works() {
+    fn it_uncons() {
         assert_eq!(2 + 2, 4);
     }
 }
