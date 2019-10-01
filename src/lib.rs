@@ -134,14 +134,16 @@ impl<R: Read> StreamOnce for ElasticBufferedReadStream<R> {
     type Error = Errors<u8, u8, u64>;
 
     fn uncons(&mut self) -> Result<u8, StreamErrorFor<Self>> {
-        let chunk_index = self.cursor_pos / CHUNK_SIZE;
-        let item_index = self.cursor_pos % CHUNK_SIZE;
+        let mut chunk_index = self.cursor_pos / CHUNK_SIZE;
+        let mut item_index = self.cursor_pos % CHUNK_SIZE;
 
         assert!(chunk_index <= self.buffer.len());
 
         if chunk_index == self.buffer.len() {
             assert!(self.eof.is_none());
             self.free_useless_chunks();
+            chunk_index = self.cursor_pos / CHUNK_SIZE;
+            item_index = self.cursor_pos % CHUNK_SIZE;
             self.buffer.push_back([0; CHUNK_SIZE]);
             self.eof = read_exact_or_eof(&mut self.raw_read, self.buffer.back_mut().unwrap())?;
         }
@@ -208,7 +210,8 @@ mod tests {
         let mut fake_read = String::with_capacity(CHUNK_SIZE*3);
 
         let beautiful_sentence = "This is a sentence, what a beautiful sentence !";
-        for _ in 0..(CHUNK_SIZE*3 / beautiful_sentence.len()) {
+        let number_of_sentences = CHUNK_SIZE*3 / beautiful_sentence.len();
+        for _ in 0..number_of_sentences {
             fake_read += beautiful_sentence;
         }
 
@@ -220,12 +223,28 @@ mod tests {
         assert_eq!(stream.uncons(), Ok(b's'));
         assert_eq!(stream.uncons(), Ok(b' '));
 
-        for _ in 0..(CHUNK_SIZE + beautiful_sentence.len() - CHUNK_SIZE % beautiful_sentence.len()) {
+        let first_sentence_of_next_chunk_dist = CHUNK_SIZE + beautiful_sentence.len() - CHUNK_SIZE % beautiful_sentence.len();
+        for _ in 0..first_sentence_of_next_chunk_dist {
             assert!(stream.uncons().is_ok());
         }
 
         assert_eq!(stream.uncons(), Ok(b'i'));
         assert_eq!(stream.uncons(), Ok(b's'));
         assert_eq!(stream.uncons(), Ok(b' '));
+
+        for _ in 0..first_sentence_of_next_chunk_dist {
+            assert!(stream.uncons().is_ok());
+        }
+
+        assert_eq!(stream.uncons(), Ok(b'a'));
+        assert_eq!(stream.uncons(), Ok(b' '));
+
+        let dist_to_last_char = number_of_sentences*beautiful_sentence.len() - 10 - 2*first_sentence_of_next_chunk_dist - 1;
+        for _ in 0..dist_to_last_char {
+            assert!(stream.uncons().is_ok());
+        }
+
+        assert_eq!(stream.uncons(), Ok(b'!'));
+        assert_eq!(stream.uncons(), Err(StreamErrorFor::<ElasticBufferedReadStream<&[u8]>>::end_of_input()));
     }
 }
