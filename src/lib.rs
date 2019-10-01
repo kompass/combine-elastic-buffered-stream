@@ -101,12 +101,16 @@ impl<R: Read> ElasticBufferedReadStream<R> {
     }
 
     fn free_useless_chunks(&mut self) { // TODO : sub_offset
-        let min_checkpoint_pos = self.checkpoints.min();
-        if let Some(min) = min_checkpoint_pos {
-            self.buffer.drain(..min%CHUNK_SIZE);
-        } else {
-            self.buffer.drain(..self.buffer.len());
-        }
+        let checkpoint_pos_min = self.checkpoints.min();
+        let global_pos_min = checkpoint_pos_min.map_or(self.cursor_pos, |cp_min| cp_min.min(self.cursor_pos));
+        let drain_quantity = global_pos_min / CHUNK_SIZE;
+
+        self.buffer.drain(..drain_quantity);
+
+        let offset_delta = drain_quantity * CHUNK_SIZE;
+        self.cursor_pos -= offset_delta;
+        self.offset += offset_delta as u64;
+        self.checkpoints.sub_offset(offset_delta);
     }
 }
 
@@ -182,7 +186,7 @@ mod tests {
     use combine::stream::StreamErrorFor;
 
     #[test]
-    fn it_uncons() {
+    fn it_uncons_on_one_chunk() {
         let fake_read = &b"This is the text !"[..];
         let mut stream = ElasticBufferedReadStream::new(fake_read);
         assert_eq!(stream.uncons(), Ok(b'T'));
@@ -192,10 +196,36 @@ mod tests {
         assert_eq!(stream.uncons(), Ok(b' '));
 
         for _ in 0..12 {
-            stream.uncons().unwrap();
+            assert!(stream.uncons().is_ok());
         }
 
         assert_eq!(stream.uncons(), Ok(b'!'));
         assert_eq!(stream.uncons(), Err(StreamErrorFor::<ElasticBufferedReadStream<&[u8]>>::end_of_input()));
+    }
+
+    #[test]
+    fn it_uncons_on_multiple_chunks() {
+        let mut fake_read = String::with_capacity(CHUNK_SIZE*3);
+
+        let beautiful_sentence = "This is a sentence, what a beautiful sentence !";
+        for _ in 0..(CHUNK_SIZE*3 / beautiful_sentence.len()) {
+            fake_read += beautiful_sentence;
+        }
+
+        let mut stream = ElasticBufferedReadStream::new(fake_read.as_bytes());
+
+        assert_eq!(stream.uncons(), Ok(b'T'));
+        assert_eq!(stream.uncons(), Ok(b'h'));
+        assert_eq!(stream.uncons(), Ok(b'i'));
+        assert_eq!(stream.uncons(), Ok(b's'));
+        assert_eq!(stream.uncons(), Ok(b' '));
+
+        for _ in 0..(CHUNK_SIZE + beautiful_sentence.len() - CHUNK_SIZE % beautiful_sentence.len()) {
+            assert!(stream.uncons().is_ok());
+        }
+
+        assert_eq!(stream.uncons(), Ok(b'i'));
+        assert_eq!(stream.uncons(), Ok(b's'));
+        assert_eq!(stream.uncons(), Ok(b' '));
     }
 }
