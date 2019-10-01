@@ -56,7 +56,11 @@ impl CheckPointSet {
             if let Some(intern) = cp.0.upgrade() {
                 let pos = intern.get();
 
-                min = min.map(|val| val.min(pos));
+                min = Some(if let Some(min_val) = min {
+                    min_val.min(pos)
+                } else {
+                    pos
+                });
 
                 true
             } else {
@@ -65,6 +69,13 @@ impl CheckPointSet {
         });
 
         min
+    }
+
+    fn sub_offset(&self, value: usize) {
+        for cp in self.0.borrow().iter() {
+            let handled = cp.0.upgrade().unwrap(); // sub_offset has to be called right after min, so there is no unhandled value
+            handled.set(handled.get() - value);
+        }
     }
 }
 
@@ -89,7 +100,7 @@ impl<R: Read> ElasticBufferedReadStream<R> {
         }
     }
 
-    fn free_useless_chunks(&mut self) {
+    fn free_useless_chunks(&mut self) { // TODO : sub_offset
         let min_checkpoint_pos = self.checkpoints.min();
         if let Some(min) = min_checkpoint_pos {
             self.buffer.drain(..min%CHUNK_SIZE);
@@ -122,15 +133,20 @@ impl<R: Read> StreamOnce for ElasticBufferedReadStream<R> {
         let chunk_index = self.cursor_pos / CHUNK_SIZE;
         let item_index = self.cursor_pos % CHUNK_SIZE;
 
-        if self.buffer.len() <= chunk_index {
+        assert!(chunk_index <= self.buffer.len());
+
+        if chunk_index == self.buffer.len() {
+            assert!(self.eof.is_none());
+            self.free_useless_chunks();
+            self.buffer.push_back([0; CHUNK_SIZE]);
+            self.eof = read_exact_or_eof(&mut self.raw_read, self.buffer.back_mut().unwrap())?;
+        }
+
+        if chunk_index == self.buffer.len() - 1 {
             if let Some(eof_pos_from_right) = self.eof {
                 if item_index >= CHUNK_SIZE - eof_pos_from_right.get() {
                     return Err(StreamErrorFor::<Self>::end_of_input());
                 }
-            } else {
-                self.free_useless_chunks();
-                self.buffer.push_back([0; CHUNK_SIZE]);
-                self.eof = read_exact_or_eof(&mut self.raw_read, self.buffer.back_mut().unwrap())?;
             }
         }
 
@@ -162,8 +178,24 @@ impl<R: Read> Resetable for ElasticBufferedReadStream<R> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use combine::stream::StreamErrorFor;
+
     #[test]
     fn it_uncons() {
-        assert_eq!(2 + 2, 4);
+        let fake_read = &b"This is the text !"[..];
+        let mut stream = ElasticBufferedReadStream::new(fake_read);
+        assert_eq!(stream.uncons(), Ok(b'T'));
+        assert_eq!(stream.uncons(), Ok(b'h'));
+        assert_eq!(stream.uncons(), Ok(b'i'));
+        assert_eq!(stream.uncons(), Ok(b's'));
+        assert_eq!(stream.uncons(), Ok(b' '));
+
+        for _ in 0..12 {
+            stream.uncons().unwrap();
+        }
+
+        assert_eq!(stream.uncons(), Ok(b'!'));
+        assert_eq!(stream.uncons(), Err(StreamErrorFor::<ElasticBufferedReadStream<&[u8]>>::end_of_input()));
     }
 }
