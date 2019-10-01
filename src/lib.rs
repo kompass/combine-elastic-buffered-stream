@@ -8,8 +8,6 @@ use core::num::NonZeroUsize;
 
 const CHUNK_SIZE: usize = 8096;
 
-pub type CheckPointId = usize;
-
 pub type InternalCheckPoint = Cell<usize>;
 
 #[derive(Clone)]
@@ -246,5 +244,54 @@ mod tests {
 
         assert_eq!(stream.uncons(), Ok(b'!'));
         assert_eq!(stream.uncons(), Err(StreamErrorFor::<ElasticBufferedReadStream<&[u8]>>::end_of_input()));
+    }
+
+    #[test]
+    fn it_resets_on_checkpoint() {
+        let mut fake_read = String::with_capacity(CHUNK_SIZE*3);
+
+        let beautiful_sentence = "This is a sentence, what a beautiful sentence !";
+        let number_of_sentences = CHUNK_SIZE*3 / beautiful_sentence.len();
+        for _ in 0..number_of_sentences {
+            fake_read += beautiful_sentence;
+        }
+
+        let mut stream = ElasticBufferedReadStream::new(fake_read.as_bytes());
+
+        let first_sentence_of_next_chunk_dist = CHUNK_SIZE + beautiful_sentence.len() - CHUNK_SIZE % beautiful_sentence.len();
+        for _ in 0..first_sentence_of_next_chunk_dist {
+            assert!(stream.uncons().is_ok());
+        }
+
+        assert_eq!(stream.uncons(), Ok(b'T'));
+        assert_eq!(stream.uncons(), Ok(b'h'));
+        assert_eq!(stream.uncons(), Ok(b'i'));
+        assert_eq!(stream.uncons(), Ok(b's'));
+        assert_eq!(stream.uncons(), Ok(b' '));
+
+        let cp = stream.checkpoint();
+
+        assert_eq!(stream.uncons(), Ok(b'i'));
+        assert_eq!(stream.uncons(), Ok(b's'));
+        assert_eq!(stream.uncons(), Ok(b' '));
+
+        stream.reset(cp);
+        let cp = stream.checkpoint();
+
+        assert_eq!(stream.uncons(), Ok(b'i'));
+        assert_eq!(stream.uncons(), Ok(b's'));
+        assert_eq!(stream.uncons(), Ok(b' '));
+
+        for _ in 0..first_sentence_of_next_chunk_dist {
+            assert!(stream.uncons().is_ok());
+        }
+
+        assert_eq!(stream.uncons(), Ok(b'a'));
+
+        stream.reset(cp);
+
+        assert_eq!(stream.uncons(), Ok(b'i'));
+        assert_eq!(stream.uncons(), Ok(b's'));
+        assert_eq!(stream.uncons(), Ok(b' '));
     }
 }
