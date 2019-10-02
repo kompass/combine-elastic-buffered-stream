@@ -114,6 +114,47 @@ impl<R: Read> ElasticBufferedReadStream<R> {
     pub fn buffer_len(&self) -> usize {
         self.buffer.len()
     }
+
+    fn uncons_range(&mut self, size: usize) -> Result<(&[u8], &[u8]), StreamErrorFor<Self>> {
+        let range_begin = self.cursor_pos;
+        let range_end = self.cursor_pos + size;
+
+        let range_begin_chunk = range_begin / CHUNK_SIZE;
+        let range_begin_index = range_begin % CHUNK_SIZE;
+
+        let range_end_chunk = range_end / CHUNK_SIZE;
+        let range_end_index = range_end % CHUNK_SIZE;
+
+        while range_end_chunk >= self.buffer.len() {
+            if self.eof.is_some() {
+                return Err(StreamErrorFor::<Self>::end_of_input());
+            }
+
+            self.free_useless_chunks();
+            self.buffer.push_back([0; CHUNK_SIZE]);
+            self.eof = read_exact_or_eof(&mut self.raw_read, self.buffer.back_mut().unwrap())?;
+        }
+
+        if range_end_chunk == self.buffer_len() - 1 {
+            if let Some(eof_pos_from_right) = self.eof {
+                if range_end_index >= CHUNK_SIZE - eof_pos_from_right {
+                    return Err(StreamErrorFor::<Self>::end_of_input());
+                }
+            }
+        }
+
+        let buffer_slices = self.buffer.as_slices();
+
+        let range_begin_is_in_first_slice = range_begin_chunk < buffer_slices.0.len();
+        let range_end_is_in_first_slice = range_end_chunk < buffer slices.0.len();
+
+        let range_slices = match (range_begin_is_in_first_slice, range_end_is_in_first_slice) {
+            (false, false) => (buffer_slices.0[range_begin_chunk..range_end_chunk], []),
+            (false, true) => (buffer_slices.0[range_begin_chunk..], buffer_slices.1[..(range_end_chunk - buffer_slices.0.len())]),
+            (true, true) => ([], buffer_slices.1[range_begin_chunk - buffer_slices.0.len(), range_end_chunk - buffer_slices.0.len()]),
+            (false, false) => panic!("range end can't be before range begin")
+        }
+    }
 }
 
 fn read_exact_or_eof<R: Read>(
