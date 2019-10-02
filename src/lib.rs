@@ -56,11 +56,8 @@ impl CheckPointSet {
             if let Some(intern) = cp.0.upgrade() {
                 let pos = intern.get();
 
-                min = Some(if let Some(min_val) = min {
-                    min_val.min(pos)
-                } else {
-                    pos
-                });
+                let min_val = min.map_or(pos, |min_val| pos.min(min_val));
+                min = Some(min_val);
 
                 true
             } else {
