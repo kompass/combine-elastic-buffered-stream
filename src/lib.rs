@@ -6,7 +6,7 @@ use std::io::Read;
 use std::rc::{Rc, Weak};
 use core::num::NonZeroUsize;
 
-const CHUNK_SIZE: usize = 8096;
+pub const CHUNK_SIZE: usize = 8096;
 
 pub type InternalCheckPoint = Cell<usize>;
 
@@ -109,6 +109,10 @@ impl<R: Read> ElasticBufferedReadStream<R> {
         self.cursor_pos -= offset_delta;
         self.offset += offset_delta as u64;
         self.checkpoints.sub_offset(offset_delta);
+    }
+
+    pub fn buffer_len(&self) -> usize {
+        self.buffer.len()
     }
 }
 
@@ -293,5 +297,39 @@ mod tests {
         assert_eq!(stream.uncons(), Ok(b'i'));
         assert_eq!(stream.uncons(), Ok(b's'));
         assert_eq!(stream.uncons(), Ok(b' '));
+    }
+
+    #[test]
+    fn it_free_useless_memory_when_reading_new_chunk() {
+        let mut fake_read = String::with_capacity(CHUNK_SIZE*3);
+
+        let beautiful_sentence = "This is a sentence, what a beautiful sentence !";
+        let number_of_sentences = CHUNK_SIZE*3 / beautiful_sentence.len();
+        for _ in 0..number_of_sentences {
+            fake_read += beautiful_sentence;
+        }
+
+        let mut stream = ElasticBufferedReadStream::new(fake_read.as_bytes());
+
+        let cp = stream.checkpoint();
+        assert_eq!(stream.buffer_len(), 0);
+        assert_eq!(stream.uncons(), Ok(b'T'));
+        assert_eq!(stream.buffer_len(), 1);
+
+        for _ in 0..CHUNK_SIZE {
+            assert!(stream.uncons().is_ok());
+        }
+
+        assert_eq!(stream.buffer_len(), 2);
+
+        stream.reset(cp);
+
+        assert_eq!(stream.uncons(), Ok(b'T'));
+
+        for _ in 0..2*CHUNK_SIZE {
+            assert!(stream.uncons().is_ok());
+        }
+
+        assert_eq!(stream.buffer_len(), 1);
     }
 }
