@@ -33,16 +33,16 @@ impl CheckPointHandler {
     }
 }
 
-struct CheckPointSet(RefCell<VecDeque<CheckPointHandler>>);
+struct CheckPointSet(RefCell<Vec<CheckPointHandler>>);
 
 impl CheckPointSet {
     fn new() -> CheckPointSet {
-        CheckPointSet(RefCell::new(VecDeque::new()))
+        CheckPointSet(RefCell::new(Vec::new()))
     }
 
     fn insert(&self, pos: usize) -> CheckPoint {
         let cp = CheckPoint::new(pos);
-        self.0.borrow_mut().push_back(CheckPointHandler::from_checkpoint(&cp));
+        self.0.borrow_mut().push(CheckPointHandler::from_checkpoint(&cp));
 
         cp
     }
@@ -98,7 +98,7 @@ impl<R: Read> ElasticBufferedReadStream<R> {
         }
     }
 
-    fn free_useless_chunks(&mut self) { // TODO : sub_offset
+    fn free_useless_chunks(&mut self) {
         let checkpoint_pos_min = self.checkpoints.min();
         let global_pos_min = checkpoint_pos_min.map_or(self.cursor_pos, |cp_min| cp_min.min(self.cursor_pos));
         let drain_quantity = global_pos_min / CHUNK_SIZE;
