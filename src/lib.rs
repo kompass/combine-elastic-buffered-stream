@@ -1,10 +1,10 @@
-use std::cell::{RefCell, Cell};
-use combine::stream::{Positioned, Resetable, StreamErrorFor, StreamOnce};
 use combine::stream::easy::Errors;
+use combine::stream::{Positioned, Resetable, StreamErrorFor, StreamOnce};
+use core::num::NonZeroUsize;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::io::Read;
 use std::rc::{Rc, Weak};
-use core::num::NonZeroUsize;
 
 pub const CHUNK_SIZE: usize = 8096;
 
@@ -42,7 +42,9 @@ impl CheckPointSet {
 
     fn insert(&self, pos: usize) -> CheckPoint {
         let cp = CheckPoint::new(pos);
-        self.0.borrow_mut().push(CheckPointHandler::from_checkpoint(&cp));
+        self.0
+            .borrow_mut()
+            .push(CheckPointHandler::from_checkpoint(&cp));
 
         cp
     }
@@ -100,7 +102,8 @@ impl<R: Read> ElasticBufferedReadStream<R> {
 
     fn free_useless_chunks(&mut self) {
         let checkpoint_pos_min = self.checkpoints.min();
-        let global_pos_min = checkpoint_pos_min.map_or(self.cursor_pos, |cp_min| cp_min.min(self.cursor_pos));
+        let global_pos_min =
+            checkpoint_pos_min.map_or(self.cursor_pos, |cp_min| cp_min.min(self.cursor_pos));
         let drain_quantity = global_pos_min / CHUNK_SIZE;
 
         self.buffer.drain(..drain_quantity);
@@ -116,12 +119,18 @@ impl<R: Read> ElasticBufferedReadStream<R> {
     }
 }
 
-fn read_exact_or_eof<R: Read>(reader: &mut R, mut chunk: &mut [u8]) -> std::io::Result<Option<NonZeroUsize>> {
+fn read_exact_or_eof<R: Read>(
+    reader: &mut R,
+    mut chunk: &mut [u8],
+) -> std::io::Result<Option<NonZeroUsize>> {
     while !chunk.is_empty() {
         match reader.read(chunk) {
             Ok(0) => break,
-            Ok(n) => { let tmp = chunk; chunk = &mut tmp[n..];}
-            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {},
+            Ok(n) => {
+                let tmp = chunk;
+                chunk = &mut tmp[n..];
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {}
             Err(e) => return Err(e),
         }
     }
@@ -204,15 +213,18 @@ mod tests {
         }
 
         assert_eq!(stream.uncons(), Ok(b'!'));
-        assert_eq!(stream.uncons(), Err(StreamErrorFor::<ElasticBufferedReadStream<&[u8]>>::end_of_input()));
+        assert_eq!(
+            stream.uncons(),
+            Err(StreamErrorFor::<ElasticBufferedReadStream<&[u8]>>::end_of_input())
+        );
     }
 
     #[test]
     fn it_uncons_on_multiple_chunks() {
-        let mut fake_read = String::with_capacity(CHUNK_SIZE*3);
+        let mut fake_read = String::with_capacity(CHUNK_SIZE * 3);
 
         let beautiful_sentence = "This is a sentence, what a beautiful sentence !";
-        let number_of_sentences = CHUNK_SIZE*3 / beautiful_sentence.len();
+        let number_of_sentences = CHUNK_SIZE * 3 / beautiful_sentence.len();
         for _ in 0..number_of_sentences {
             fake_read += beautiful_sentence;
         }
@@ -225,7 +237,8 @@ mod tests {
         assert_eq!(stream.uncons(), Ok(b's'));
         assert_eq!(stream.uncons(), Ok(b' '));
 
-        let first_sentence_of_next_chunk_dist = CHUNK_SIZE + beautiful_sentence.len() - CHUNK_SIZE % beautiful_sentence.len();
+        let first_sentence_of_next_chunk_dist =
+            CHUNK_SIZE + beautiful_sentence.len() - CHUNK_SIZE % beautiful_sentence.len();
         for _ in 0..first_sentence_of_next_chunk_dist {
             assert!(stream.uncons().is_ok());
         }
@@ -241,28 +254,35 @@ mod tests {
         assert_eq!(stream.uncons(), Ok(b'a'));
         assert_eq!(stream.uncons(), Ok(b' '));
 
-        let dist_to_last_char = number_of_sentences*beautiful_sentence.len() - 10 - 2*first_sentence_of_next_chunk_dist - 1;
+        let dist_to_last_char = number_of_sentences * beautiful_sentence.len()
+            - 10 // Letters already read : "This is a "
+            - 2 * first_sentence_of_next_chunk_dist
+            - 1;
         for _ in 0..dist_to_last_char {
             assert!(stream.uncons().is_ok());
         }
 
         assert_eq!(stream.uncons(), Ok(b'!'));
-        assert_eq!(stream.uncons(), Err(StreamErrorFor::<ElasticBufferedReadStream<&[u8]>>::end_of_input()));
+        assert_eq!(
+            stream.uncons(),
+            Err(StreamErrorFor::<ElasticBufferedReadStream<&[u8]>>::end_of_input())
+        );
     }
 
     #[test]
     fn it_resets_on_checkpoint() {
-        let mut fake_read = String::with_capacity(CHUNK_SIZE*3);
+        let mut fake_read = String::with_capacity(CHUNK_SIZE * 3);
 
         let beautiful_sentence = "This is a sentence, what a beautiful sentence !";
-        let number_of_sentences = CHUNK_SIZE*3 / beautiful_sentence.len();
+        let number_of_sentences = CHUNK_SIZE * 3 / beautiful_sentence.len();
         for _ in 0..number_of_sentences {
             fake_read += beautiful_sentence;
         }
 
         let mut stream = ElasticBufferedReadStream::new(fake_read.as_bytes());
 
-        let first_sentence_of_next_chunk_dist = CHUNK_SIZE + beautiful_sentence.len() - CHUNK_SIZE % beautiful_sentence.len();
+        let first_sentence_of_next_chunk_dist =
+            CHUNK_SIZE + beautiful_sentence.len() - CHUNK_SIZE % beautiful_sentence.len();
         for _ in 0..first_sentence_of_next_chunk_dist {
             assert!(stream.uncons().is_ok());
         }
@@ -301,10 +321,10 @@ mod tests {
 
     #[test]
     fn it_free_useless_memory_when_reading_new_chunk() {
-        let mut fake_read = String::with_capacity(CHUNK_SIZE*3);
+        let mut fake_read = String::with_capacity(CHUNK_SIZE * 3);
 
         let beautiful_sentence = "This is a sentence, what a beautiful sentence !";
-        let number_of_sentences = CHUNK_SIZE*3 / beautiful_sentence.len();
+        let number_of_sentences = CHUNK_SIZE * 3 / beautiful_sentence.len();
         for _ in 0..number_of_sentences {
             fake_read += beautiful_sentence;
         }
@@ -326,7 +346,7 @@ mod tests {
 
         assert_eq!(stream.uncons(), Ok(b'T'));
 
-        for _ in 0..2*CHUNK_SIZE {
+        for _ in 0..2 * CHUNK_SIZE {
             assert!(stream.uncons().is_ok());
         }
 
