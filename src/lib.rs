@@ -1,5 +1,5 @@
 use combine::stream::easy::Errors;
-use combine::stream::{Positioned, Resetable, StreamErrorFor, StreamOnce};
+use combine::stream::{Positioned, Resetable, StreamErrorFor, StreamOnce, RangeStreamOnce};
 use core::num::NonZeroUsize;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -85,7 +85,7 @@ pub struct ElasticBufferedReadStream<R: Read> {
     offset: u64, // The capacity of this parameter limits the size of the stream
 }
 
-impl<R: Read> ElasticBufferedReadStream<R> {
+impl<'a, R: Read> ElasticBufferedReadStream<R> {
     pub fn new(read: R) -> Self {
         Self {
             raw_read: read,
@@ -135,11 +135,11 @@ fn read_exact_or_eof<R: Read>(
     Ok(NonZeroUsize::new(chunk.len()))
 }
 
-impl<R: Read> StreamOnce for ElasticBufferedReadStream<R> {
+impl<'a, R: Read> StreamOnce for &'a mut ElasticBufferedReadStream<R> {
     type Item = u8;
-    type Range = u8; // TODO: Change it when we implement RangeStream
+    type Range = (&'a [u8], &'a [u8]);
     type Position = u64;
-    type Error = Errors<u8, u8, u64>;
+    type Error = Errors<Self::Item, Self::Range, Self::Position>;
 
     fn uncons(&mut self) -> Result<u8, StreamErrorFor<Self>> {
         let mut chunk_index = self.cursor_pos / CHUNK_SIZE;
@@ -172,13 +172,13 @@ impl<R: Read> StreamOnce for ElasticBufferedReadStream<R> {
     }
 }
 
-impl<R: Read> Positioned for ElasticBufferedReadStream<R> {
+impl<'a, R: Read> Positioned for &'a mut ElasticBufferedReadStream<R> {
     fn position(&self) -> Self::Position {
         self.offset + self.cursor_pos as u64
     }
 }
 
-impl<R: Read> Resetable for ElasticBufferedReadStream<R> {
+impl<'a, R: Read> Resetable for &'a mut ElasticBufferedReadStream<R> {
     type Checkpoint = CheckPoint;
 
     fn checkpoint(&self) -> Self::Checkpoint {
@@ -190,6 +190,11 @@ impl<R: Read> Resetable for ElasticBufferedReadStream<R> {
     }
 }
 
+impl<'a, R: Read> RangeStreamOnce for &'a mut ElasticBufferedReadStream<R> {
+    fn uncons_range(&mut self, size: usize) -> Result<Self::Range, StreamErrorFor<Self>> {
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,7 +203,8 @@ mod tests {
     #[test]
     fn it_uncons_on_one_chunk() {
         let fake_read = &b"This is the text !"[..];
-        let mut stream = ElasticBufferedReadStream::new(fake_read);
+        let mut stream_owned = ElasticBufferedReadStream::new(fake_read);
+        let stream = &mut stream_owned;
         assert_eq!(stream.uncons(), Ok(b'T'));
         assert_eq!(stream.uncons(), Ok(b'h'));
         assert_eq!(stream.uncons(), Ok(b'i'));
@@ -212,7 +218,7 @@ mod tests {
         assert_eq!(stream.uncons(), Ok(b'!'));
         assert_eq!(
             stream.uncons(),
-            Err(StreamErrorFor::<ElasticBufferedReadStream<&[u8]>>::end_of_input())
+            Err(StreamErrorFor::<&mut ElasticBufferedReadStream<&[u8]>>::end_of_input())
         );
     }
 
@@ -226,7 +232,8 @@ mod tests {
             fake_read += beautiful_sentence;
         }
 
-        let mut stream = ElasticBufferedReadStream::new(fake_read.as_bytes());
+        let mut stream_owned = ElasticBufferedReadStream::new(fake_read.as_bytes());
+        let stream = &mut stream_owned;
 
         assert_eq!(stream.uncons(), Ok(b'T'));
         assert_eq!(stream.uncons(), Ok(b'h'));
@@ -262,7 +269,7 @@ mod tests {
         assert_eq!(stream.uncons(), Ok(b'!'));
         assert_eq!(
             stream.uncons(),
-            Err(StreamErrorFor::<ElasticBufferedReadStream<&[u8]>>::end_of_input())
+            Err(StreamErrorFor::<&mut ElasticBufferedReadStream<&[u8]>>::end_of_input())
         );
     }
 
@@ -276,7 +283,8 @@ mod tests {
             fake_read += beautiful_sentence;
         }
 
-        let mut stream = ElasticBufferedReadStream::new(fake_read.as_bytes());
+        let mut stream_owned = ElasticBufferedReadStream::new(fake_read.as_bytes());
+        let stream = &mut stream_owned;
 
         let first_sentence_of_next_chunk_dist =
             CHUNK_SIZE + beautiful_sentence.len() - CHUNK_SIZE % beautiful_sentence.len();
@@ -326,7 +334,8 @@ mod tests {
             fake_read += beautiful_sentence;
         }
 
-        let mut stream = ElasticBufferedReadStream::new(fake_read.as_bytes());
+        let mut stream_owned = ElasticBufferedReadStream::new(fake_read.as_bytes());
+        let stream = &mut stream_owned;
 
         let cp = stream.checkpoint();
         assert_eq!(stream.buffer_len(), 0);
