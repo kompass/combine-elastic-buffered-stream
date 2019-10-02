@@ -137,7 +137,7 @@ impl<R: Read> ElasticBufferedReadStream<R> {
 
         if range_end_chunk == self.buffer_len() - 1 {
             if let Some(eof_pos_from_right) = self.eof {
-                if range_end_index >= CHUNK_SIZE - eof_pos_from_right {
+                if range_end_index >= CHUNK_SIZE - eof_pos_from_right.get() {
                     return Err(StreamErrorFor::<Self>::end_of_input());
                 }
             }
@@ -146,14 +146,16 @@ impl<R: Read> ElasticBufferedReadStream<R> {
         let buffer_slices = self.buffer.as_slices();
 
         let range_begin_is_in_first_slice = range_begin_chunk < buffer_slices.0.len();
-        let range_end_is_in_first_slice = range_end_chunk < buffer slices.0.len();
+        let range_end_is_in_first_slice = range_end_chunk < buffer_slices.0.len();
 
-        let range_slices = match (range_begin_is_in_first_slice, range_end_is_in_first_slice) {
-            (false, false) => (buffer_slices.0[range_begin_chunk..range_end_chunk], []),
-            (false, true) => (buffer_slices.0[range_begin_chunk..], buffer_slices.1[..(range_end_chunk - buffer_slices.0.len())]),
-            (true, true) => ([], buffer_slices.1[range_begin_chunk - buffer_slices.0.len(), range_end_chunk - buffer_slices.0.len()]),
+        let mut range_slices = match (range_begin_is_in_first_slice, range_end_is_in_first_slice) {
+            (false, false) => (&buffer_slices.0[range_begin_chunk..range_end_chunk], &buffer_slices.1[0..0]),
+            (false, true) => (&buffer_slices.0[range_begin_chunk..], &buffer_slices.1[..(range_end_chunk - buffer_slices.0.len())]),
+            (true, true) => (&buffer_slices.0[0..0], &buffer_slices.1[(range_begin_chunk - buffer_slices.0.len())..(range_end_chunk - buffer_slices.0.len())]),
             (false, false) => panic!("range end can't be before range begin")
-        }
+        };
+
+        Ok(range_slices)
     }
 }
 
