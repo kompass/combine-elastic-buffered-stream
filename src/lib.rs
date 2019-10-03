@@ -1,12 +1,13 @@
 use combine::stream::easy::Errors;
 use combine::stream::{Positioned, Resetable, StreamErrorFor, StreamOnce};
 use core::num::NonZeroUsize;
+use slice_of_array::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::io::Read;
 use std::rc::{Rc, Weak};
 
-pub const CHUNK_SIZE: usize = 8096;
+pub const CHUNK_SIZE: usize = 8192;
 
 pub type InternalCheckPoint = Cell<usize>;
 
@@ -149,11 +150,25 @@ impl<R: Read> ElasticBufferedReadStream<R> {
         let range_end_is_in_first_slice = range_end_chunk < buffer_slices.0.len();
 
         let mut range_slices = match (range_begin_is_in_first_slice, range_end_is_in_first_slice) {
-            (false, false) => (&buffer_slices.0[range_begin_chunk..range_end_chunk], &buffer_slices.1[0..0]),
-            (false, true) => (&buffer_slices.0[range_begin_chunk..], &buffer_slices.1[..(range_end_chunk - buffer_slices.0.len())]),
-            (true, true) => (&buffer_slices.0[0..0], &buffer_slices.1[(range_begin_chunk - buffer_slices.0.len())..(range_end_chunk - buffer_slices.0.len())]),
-            (false, false) => panic!("range end can't be before range begin")
+            (true, true) => (buffer_slices.0[range_begin_chunk..range_end_chunk].flat(), buffer_slices.1[0..0].flat()),
+            (true, false) => (buffer_slices.0[range_begin_chunk..].flat(), buffer_slices.1[..(range_end_chunk - buffer_slices.0.len())].flat()),
+            (false, false) => (buffer_slices.0[0..0].flat(), buffer_slices.1[(range_begin_chunk - buffer_slices.0.len())..(range_end_chunk - buffer_slices.0.len())].flat()),
+            (false, true) => panic!("range end can't be before range begin")
         };
+
+        if !range_slices.0.is_empty() {
+            range_slices.0 = &range_slices.0[range_begin_index..];
+        } else {
+            range_slices.1 = &range_slices.1[range_begin_index..];
+        }
+
+        if !range_slices.1.is_empty() {
+            let end = range_slices.1.len() - CHUNK_SIZE + range_begin_index;
+            range_slices.1 = &range_slices.1[..end];
+        } else {
+            let end = range_slices.0.len() - CHUNK_SIZE + range_begin_index;
+            range_slices.0 = &range_slices.0[..end];
+        }
 
         Ok(range_slices)
     }
