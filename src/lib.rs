@@ -169,7 +169,7 @@ impl<R: Read> StreamOnce for ElasticBufferedReadStream<R> {
             }
         }
 
-        let chunk = self.buffer.get(self.chunk_index()).unwrap(); // We can unwrap because self.buffer.len() > chunk_index
+        let chunk = self.buffer.get(self.chunk_index()).unwrap(); // We can unwrap because self.chunk_index() < self.buffer.len()
         let item = chunk[self.item_index()]; //  item_index < CHUNK_SIZE
         self.cursor_pos += 1;
 
