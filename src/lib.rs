@@ -6,7 +6,9 @@ use std::collections::VecDeque;
 use std::io::Read;
 use std::rc::{Rc, Weak};
 
-pub const CHUNK_SIZE: usize = 8096;
+const ITEM_INDEX_SIZE: usize = 13;
+const ITEM_INDEX_MASK: usize = (1 << ITEM_INDEX_SIZE) - 1;
+pub const CHUNK_SIZE: usize = 1 << ITEM_INDEX_SIZE;
 
 pub type InternalCheckPoint = Cell<usize>;
 
@@ -97,6 +99,14 @@ impl<R: Read> ElasticBufferedReadStream<R> {
         }
     }
 
+    fn chunk_index(&self) -> usize {
+        self.cursor_pos >> ITEM_INDEX_SIZE
+    }
+
+    fn item_index(&self) -> usize {
+        self.cursor_pos & ITEM_INDEX_MASK
+    }
+
     fn free_useless_chunks(&mut self) {
         let checkpoint_pos_min = self.checkpoints.min();
         let global_pos_min =
@@ -142,30 +152,25 @@ impl<R: Read> StreamOnce for ElasticBufferedReadStream<R> {
     type Error = Errors<u8, u8, u64>;
 
     fn uncons(&mut self) -> Result<u8, StreamErrorFor<Self>> {
-        let mut chunk_index = self.cursor_pos / CHUNK_SIZE;
-        let mut item_index = self.cursor_pos % CHUNK_SIZE;
+        assert!(self.chunk_index() <= self.buffer.len());
 
-        assert!(chunk_index <= self.buffer.len());
-
-        if chunk_index == self.buffer.len() {
+        if self.chunk_index() == self.buffer.len() {
             assert!(self.eof.is_none());
             self.free_useless_chunks();
-            chunk_index = self.cursor_pos / CHUNK_SIZE;
-            item_index = self.cursor_pos % CHUNK_SIZE;
             self.buffer.push_back([0; CHUNK_SIZE]);
             self.eof = read_exact_or_eof(&mut self.raw_read, self.buffer.back_mut().unwrap())?;
         }
 
-        if chunk_index == self.buffer.len() - 1 {
+        if self.chunk_index() == self.buffer.len() - 1 {
             if let Some(eof_pos_from_right) = self.eof {
-                if item_index >= CHUNK_SIZE - eof_pos_from_right.get() {
+                if self.item_index() >= CHUNK_SIZE - eof_pos_from_right.get() {
                     return Err(StreamErrorFor::<Self>::end_of_input());
                 }
             }
         }
 
-        let chunk = self.buffer.get(chunk_index).unwrap(); // We can unwrap because self.buffer.len() > chunk_index
-        let item = chunk[item_index]; //  item_index < CHUNK_SIZE
+        let chunk = self.buffer.get(self.chunk_index()).unwrap(); // We can unwrap because self.buffer.len() > chunk_index
+        let item = chunk[self.item_index()]; //  item_index < CHUNK_SIZE
         self.cursor_pos += 1;
 
         Ok(item)
