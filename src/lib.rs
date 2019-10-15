@@ -116,62 +116,62 @@ impl<R: Read> ElasticBufferedReadStream<R> {
         self.buffer.len()
     }
 
-    fn uncons_range(&mut self, size: usize) -> Result<(&[u8], &[u8]), StreamErrorFor<Self>> {
-        let range_begin = self.cursor_pos;
-        let range_end = self.cursor_pos + size;
+    // fn uncons_range(&mut self, size: usize) -> Result<(&[u8], &[u8]), StreamErrorFor<Self>> {
+    //     let range_begin = self.cursor_pos;
+    //     let range_end = self.cursor_pos + size;
 
-        let range_begin_chunk = range_begin / CHUNK_SIZE;
-        let range_begin_index = range_begin % CHUNK_SIZE;
+    //     let range_begin_chunk = range_begin / CHUNK_SIZE;
+    //     let range_begin_index = range_begin % CHUNK_SIZE;
 
-        let range_end_chunk = range_end / CHUNK_SIZE;
-        let range_end_index = range_end % CHUNK_SIZE;
+    //     let range_end_chunk = range_end / CHUNK_SIZE;
+    //     let range_end_index = range_end % CHUNK_SIZE;
 
-        while range_end_chunk >= self.buffer.len() {
-            if self.eof.is_some() {
-                return Err(StreamErrorFor::<Self>::end_of_input());
-            }
+    //     while range_end_chunk >= self.buffer.len() {
+    //         if self.eof.is_some() {
+    //             return Err(StreamErrorFor::<Self>::end_of_input());
+    //         }
 
-            self.free_useless_chunks();
-            self.buffer.push_back([0; CHUNK_SIZE]);
-            self.eof = read_exact_or_eof(&mut self.raw_read, self.buffer.back_mut().unwrap())?;
-        }
+    //         self.free_useless_chunks();
+    //         self.buffer.push_back([0; CHUNK_SIZE]);
+    //         self.eof = read_exact_or_eof(&mut self.raw_read, self.buffer.back_mut().unwrap())?;
+    //     }
 
-        if range_end_chunk == self.buffer_len() - 1 {
-            if let Some(eof_pos_from_right) = self.eof {
-                if range_end_index >= CHUNK_SIZE - eof_pos_from_right.get() {
-                    return Err(StreamErrorFor::<Self>::end_of_input());
-                }
-            }
-        }
+    //     if range_end_chunk == self.buffer_len() - 1 {
+    //         if let Some(eof_pos_from_right) = self.eof {
+    //             if range_end_index >= CHUNK_SIZE - eof_pos_from_right.get() {
+    //                 return Err(StreamErrorFor::<Self>::end_of_input());
+    //             }
+    //         }
+    //     }
 
-        let buffer_slices = self.buffer.as_slices();
+    //     let buffer_slices = self.buffer.as_slices();
 
-        let range_begin_is_in_first_slice = range_begin_chunk < buffer_slices.0.len();
-        let range_end_is_in_first_slice = range_end_chunk < buffer_slices.0.len();
+    //     let range_begin_is_in_first_slice = range_begin_chunk < buffer_slices.0.len();
+    //     let range_end_is_in_first_slice = range_end_chunk < buffer_slices.0.len();
 
-        let mut range_slices = match (range_begin_is_in_first_slice, range_end_is_in_first_slice) {
-            (true, true) => (buffer_slices.0[range_begin_chunk..range_end_chunk].flat(), buffer_slices.1[0..0].flat()),
-            (true, false) => (buffer_slices.0[range_begin_chunk..].flat(), buffer_slices.1[..(range_end_chunk - buffer_slices.0.len())].flat()),
-            (false, false) => (buffer_slices.0[0..0].flat(), buffer_slices.1[(range_begin_chunk - buffer_slices.0.len())..(range_end_chunk - buffer_slices.0.len())].flat()),
-            (false, true) => panic!("range end can't be before range begin")
-        };
+    //     let mut range_slices = match (range_begin_is_in_first_slice, range_end_is_in_first_slice) {
+    //         (true, true) => (buffer_slices.0[range_begin_chunk..range_end_chunk].flat(), buffer_slices.1[0..0].flat()),
+    //         (true, false) => (buffer_slices.0[range_begin_chunk..].flat(), buffer_slices.1[..(range_end_chunk - buffer_slices.0.len())].flat()),
+    //         (false, false) => (buffer_slices.0[0..0].flat(), buffer_slices.1[(range_begin_chunk - buffer_slices.0.len())..(range_end_chunk - buffer_slices.0.len())].flat()),
+    //         (false, true) => panic!("range end can't be before range begin")
+    //     };
 
-        if !range_slices.0.is_empty() {
-            range_slices.0 = &range_slices.0[range_begin_index..];
-        } else {
-            range_slices.1 = &range_slices.1[range_begin_index..];
-        }
+    //     if !range_slices.0.is_empty() {
+    //         range_slices.0 = &range_slices.0[range_begin_index..];
+    //     } else {
+    //         range_slices.1 = &range_slices.1[range_begin_index..];
+    //     }
 
-        if !range_slices.1.is_empty() {
-            let end = range_slices.1.len() - CHUNK_SIZE + range_begin_index;
-            range_slices.1 = &range_slices.1[..end];
-        } else {
-            let end = range_slices.0.len() - CHUNK_SIZE + range_begin_index;
-            range_slices.0 = &range_slices.0[..end];
-        }
+    //     if !range_slices.1.is_empty() {
+    //         let end = range_slices.1.len() - CHUNK_SIZE + range_begin_index;
+    //         range_slices.1 = &range_slices.1[..end];
+    //     } else {
+    //         let end = range_slices.0.len() - CHUNK_SIZE + range_begin_index;
+    //         range_slices.0 = &range_slices.0[..end];
+    //     }
 
-        Ok(range_slices)
-    }
+    //     Ok(range_slices)
+    // }
 }
 
 fn read_exact_or_eof<R: Read>(
@@ -193,7 +193,7 @@ fn read_exact_or_eof<R: Read>(
     Ok(NonZeroUsize::new(chunk.len()))
 }
 
-impl<R: Read> StreamOnce for ElasticBufferedReadStream<R> {
+impl<'a, R: Read> StreamOnce for &'a mut ElasticBufferedReadStream<R> {
     type Item = u8;
     type Range = u8; // TODO: Change it when we implement RangeStream
     type Position = u64;
@@ -230,7 +230,7 @@ impl<R: Read> StreamOnce for ElasticBufferedReadStream<R> {
     }
 }
 
-impl<R: Read> Positioned for ElasticBufferedReadStream<R> {
+impl<'a, R: Read> Positioned for &'a mut ElasticBufferedReadStream<R> {
     fn position(&self) -> Self::Position {
         self.offset + self.cursor_pos as u64
     }
@@ -257,6 +257,7 @@ mod tests {
     fn it_uncons_on_one_chunk() {
         let fake_read = &b"This is the text !"[..];
         let mut stream = ElasticBufferedReadStream::new(fake_read);
+        let mut stream = &mut stream;
         assert_eq!(stream.uncons(), Ok(b'T'));
         assert_eq!(stream.uncons(), Ok(b'h'));
         assert_eq!(stream.uncons(), Ok(b'i'));
@@ -270,7 +271,7 @@ mod tests {
         assert_eq!(stream.uncons(), Ok(b'!'));
         assert_eq!(
             stream.uncons(),
-            Err(StreamErrorFor::<ElasticBufferedReadStream<&[u8]>>::end_of_input())
+            Err(StreamErrorFor::<&mut ElasticBufferedReadStream<&[u8]>>::end_of_input())
         );
     }
 
@@ -285,6 +286,7 @@ mod tests {
         }
 
         let mut stream = ElasticBufferedReadStream::new(fake_read.as_bytes());
+        let mut stream = &mut stream;
 
         assert_eq!(stream.uncons(), Ok(b'T'));
         assert_eq!(stream.uncons(), Ok(b'h'));
@@ -320,7 +322,7 @@ mod tests {
         assert_eq!(stream.uncons(), Ok(b'!'));
         assert_eq!(
             stream.uncons(),
-            Err(StreamErrorFor::<ElasticBufferedReadStream<&[u8]>>::end_of_input())
+            Err(StreamErrorFor::<&mut ElasticBufferedReadStream<&[u8]>>::end_of_input())
         );
     }
 
@@ -335,6 +337,7 @@ mod tests {
         }
 
         let mut stream = ElasticBufferedReadStream::new(fake_read.as_bytes());
+        let mut stream = &mut stream;
 
         let first_sentence_of_next_chunk_dist =
             CHUNK_SIZE + beautiful_sentence.len() - CHUNK_SIZE % beautiful_sentence.len();
@@ -385,6 +388,7 @@ mod tests {
         }
 
         let mut stream = ElasticBufferedReadStream::new(fake_read.as_bytes());
+        let mut stream = &mut stream;
 
         let cp = stream.checkpoint();
         assert_eq!(stream.buffer_len(), 0);
