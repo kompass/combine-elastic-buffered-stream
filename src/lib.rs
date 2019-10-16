@@ -147,7 +147,7 @@ fn read_exact_or_eof<R: Read>(
 
 impl<R: Read> StreamOnce for ElasticBufferedReadStream<R> {
     type Item = u8;
-    type Range = u8; // TODO: Change it when we implement RangeStream
+    type Range = u8;
     type Position = u64;
     type Error = Errors<u8, u8, u64>;
 
